@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Sensor Data and Camera Display</title>
+    <style>
+        /* The CSS remains the same as in the previous version */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #0a0a0a;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            padding: 10px;
+        }
+
+        .sensor-data, .camera-display, .legend {
+            background-color: #1a1a1a;
+            border-radius: 10px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+
+        .sensor-data {
+            flex: 0 0 50%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        canvas {
+            width: 100%;
+            height: 250px;
+            background-color: #2a2a2a;
+            border-radius: 8px;
+        }
+
+        .values {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 5px;
+            font-size: 0.8em;
+        }
+
+        .values div {
+            text-align: center;
+            background-color: #2a2a2a;
+            padding: 5px;
+            border-radius: 5px;
+            flex: 1;
+            margin: 0 2px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 5px;
+            margin-top: 5px;
+        }
+
+        button {
+            padding: 8px;
+            font-size: 0.9em;
+            background-color: #4a4a4a;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            flex: 1;
+        }
+
+        #toggleButton { background-color: #007bff; }
+        #toggleAdditionalControls { background-color: #28a745; }
+
+        .additional-controls {
+            display: none;
+            gap: 5px;
+            margin-top: 5px;
+        }
+
+        #speedButton { background-color: #ffc107; color: #000; }
+        #clearDataButton { background-color: #dc3545; }
+        #saveImageButton { background-color: #17a2b8; }
+
+        .camera-display {
+            flex: 0 0 35%;
+            overflow: hidden;
+        }
+
+        .camera-display video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 8px;
+            transform: scaleX(-1);
+        }
+      	
+      	/* Animasi untuk memperbesar teks */
+		@keyframes scaleUp {
+    		0% {
+        		transform: scale(1);
+    		}
+    		50% {
+        		transform: scale(1.5);
+    		}
+    		100% {
+        		transform: scale(1);
+    		}
+		}
+
+/* Menambahkan kelas getaran besar */
+		.vibrate {
+   			 animation: scaleUp 0.3s ease-in-out;
+    		color: #ff4136; /* Warna merah untuk efek visual */
+		}
+
+
+        .legend {
+            flex: 0 0 auto;
+            font-size: 0.8em;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .legend div {
+            display: flex;
+            align-items: center;
+        }
+
+        .legend div::before {
+            content: "";
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            margin-right: 4px;
+            border-radius: 50%;
+        }
+
+        .legend .red::before { background-color: #ff4136; }
+        .legend .blue::before { background-color: #0074D9; }
+        .legend .green::before { background-color: #2ECC40; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sensor-data">
+            <canvas id="chartCanvas"></canvas>
+            <div class="values">
+                <div>X: <span id="xValue">0</span></div>
+                <div>Y: <span id="yValue">0</span></div>
+                <div>Z: <span id="zValue">0</span></div>
+            </div>
+            <div class="controls">
+                <button id="toggleButton">Start</button>
+                <button id="toggleAdditionalControls">Menu</button>
+            </div>
+            <div class="additional-controls" id="additionalControls">
+                <button id="speedButton">Speed: Mid</button>
+                <button id="clearDataButton">Clear</button>
+                <button id="saveImageButton">Save</button>
+            </div>
+        </div>
+        <div class="camera-display">
+            <video id="camera" autoplay></video>
+        </div>
+        <div class="legend">
+            <div class="red">X</div>
+            <div class="blue">Y</div>
+            <div class="green">Z</div>
+        </div>
+    </div>
+
+    <audio id="alertSound" src="https://www.soundjay.com/button/sounds/beep-07.mp3"></audio>
+    <script>
+        // Most of the JavaScript remains the same
+        const canvas = document.getElementById('chartCanvas');
+        const ctx = canvas.getContext('2d');
+        const alertSound = document.getElementById('alertSound');
+        const toggleButton = document.getElementById('toggleButton');
+        const toggleAdditionalControls = document.getElementById('toggleAdditionalControls');
+        const additionalControls = document.getElementById('additionalControls');
+
+        toggleAdditionalControls.addEventListener('click', () => {
+            additionalControls.style.display = additionalControls.style.display === 'flex' ? 'none' : 'flex';
+        });
+
+        function resizeCanvas() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+            drawChart();
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        window.addEventListener('load', resizeCanvas);
+
+        const dataPoints = { red: [], blue: [], green: [] };
+        let maxPoints = 50; // Adjust based on screen size
+        let startTime = Date.now();
+        let accelerometerData = { x: 0, y: 0, z: 0 };
+        let scale = { min: -15, max: 15 };
+        const threshold = 0.00000000000000000000000000000001;
+
+        function drawChart() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawGrid();
+            drawThresholdLine(threshold);
+            drawLine(dataPoints.red, 'red');
+            drawLine(dataPoints.blue, 'blue');
+            drawLine(dataPoints.green, 'green');
+        }
+
+        function drawGrid() {
+            ctx.strokeStyle = '#ddd';
+            ctx.lineWidth = 1;
+            ctx.font = '12px Arial';
+            ctx.fillStyle = '#000';
+
+            const zeroY = canvas.height / 2;
+            const step = 5;
+
+            for (let i = scale.min; i <= scale.max; i += step) {
+                const y = zeroY - (i * canvas.height / (scale.max - scale.min));
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+                
+                if (i !== 0) {
+                    ctx.fillText(i, 10, y + 3);
+                }
+            }
+
+            ctx.fillText('0', 10, zeroY + 3);
+
+            for (let i = 0; i <= canvas.width; i += 50) {
+                const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(1);
+                ctx.beginPath();
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i, canvas.height);
+                ctx.stroke();
+                ctx.fillText(elapsedTime + 's', i + 2, canvas.height - 10);
+            }
+        }
+
+        function drawThresholdLine(value) {
+            const y = canvas.height / 2 - (value * canvas.height / (scale.max - scale.min));
+
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvas.width, y);
+            ctx.strokeStyle = '#FFA500';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        function drawLine(points, color) {
+    if (points.length === 0) return;
+    ctx.beginPath();
+    ctx.moveTo(canvas.width, points[0]);
+
+    for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(canvas.width - i * 7, points[i]); // Mengubah nilai dari 5 menjadi 2 untuk memperpanjang garis
+    }
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+}
+
+		const smoothingFactor = 0.9; // Faktor smoothing yang lebih ringan
+		let smoothedData = { x: 0, y: 0, z: 0 };
+      
+        function updateChart() {
+            const currentValues = [accelerometerData.x, accelerometerData.y, accelerometerData.z];
+			
+          	smoothedData.x = smoothingFactor * smoothedData.x + (1 - smoothingFactor) * accelerometerData.x;
+      		smoothedData.y = smoothingFactor * smoothedData.y + (1 - smoothingFactor) * accelerometerData.y;
+    		smoothedData.z = smoothingFactor * smoothedData.z + (1 - smoothingFactor) * accelerometerData.z;
+          	
+            dataPoints.red.unshift(canvas.height / 2 - accelerometerData.x * canvas.height / (scale.max - scale.min));
+    		dataPoints.blue.unshift(canvas.height / 2 - accelerometerData.y * canvas.height / (scale.max - scale.min));
+    		dataPoints.green.unshift(canvas.height / 2 - accelerometerData.z * canvas.height / (scale.max - scale.min));
+
+            if (dataPoints.red.length > maxPoints) dataPoints.red.pop();
+    		if (dataPoints.blue.length > maxPoints) dataPoints.blue.pop();
+    		if (dataPoints.green.length > maxPoints) dataPoints.green.pop();
+
+            const maxValue = Math.max(...currentValues.map(Math.abs));
+    		if (maxValue > threshold) {
+        		alertSound.play();
+        		document.getElementById('xValue').classList.add('vibrate');
+        		document.getElementById('yValue').classList.add('vibrate');
+        		document.getElementById('zValue').classList.add('vibrate');
+    		} else {
+        		document.getElementById('xValue').classList.remove('vibrate');
+        		document.getElementById('yValue').classList.remove('vibrate');
+        		document.getElementById('zValue').classList.remove('vibrate');
+    		}
+
+            drawChart();
+
+            document.getElementById('xValue').textContent = accelerometerData.x.toFixed(2);
+            document.getElementById('yValue').textContent = accelerometerData.y.toFixed(2);
+            document.getElementById('zValue').textContent = accelerometerData.z.toFixed(2);
+        }
+
+        let intervalId = null;
+        let currentSpeedIndex = 1;
+        const speedSettings = [
+            { label: 'Slow', interval: 300 },
+            { label: 'Mid', interval: 100 },
+            { label: 'Fast', interval: 30 }
+        ];
+        let currentInterval = speedSettings[currentSpeedIndex].interval;
+
+        function startUpdating(interval) {
+            if (!intervalId) {
+                startTime = Date.now();
+                intervalId = setInterval(updateChart, interval);
+            }
+        }
+
+        function stopUpdating() {
+            clearInterval(intervalId);
+            intervalId = null;
+        }
+
+        toggleButton.addEventListener('click', () => {
+            if (intervalId) {
+                stopUpdating();
+                toggleButton.textContent = 'Start';
+            } else {
+                startUpdating(currentInterval);
+                toggleButton.textContent = 'Stop';
+            }
+        });
+
+        const speedButton = document.getElementById('speedButton');
+        speedButton.addEventListener('click', () => {
+            currentSpeedIndex = (currentSpeedIndex + 1) % speedSettings.length;
+            const newSpeed = speedSettings[currentSpeedIndex];
+            speedButton.textContent = `Speed: ${newSpeed.label}`;
+            currentInterval = newSpeed.interval;
+            if (intervalId) {
+                stopUpdating();
+                startUpdating(currentInterval);
+            }
+        });
+
+        document.getElementById('clearDataButton').addEventListener('click', () => {
+            dataPoints.red = [];
+            dataPoints.blue = [];
+            dataPoints.green = [];
+            drawChart();
+        });
+
+        document.getElementById('saveImageButton').addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.href = canvas.toDataURL('image/png');
+            link.download = 'chart.png';
+            link.click();
+        });
+
+        if (window.DeviceMotionEvent) {
+            window.addEventListener('devicemotion', function (event) {
+                accelerometerData.x = event.accelerationIncludingGravity.x || 0;
+                accelerometerData.y = event.accelerationIncludingGravity.y || 0;
+                accelerometerData.z = event.accelerationIncludingGravity.z || 0;
+            }, true);
+        }
+
+        const video = document.getElementById('camera');
+        // This is the changed part: we now use 'user' instead of 'environment' for the front camera
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
+            .then(stream => {
+                video.srcObject = stream;
+            })
+            .catch(error => {
+                console.error('Error accessing camera:', error);
+            });
+
+        resizeCanvas();
+    </script>
+</body>
+</html>
